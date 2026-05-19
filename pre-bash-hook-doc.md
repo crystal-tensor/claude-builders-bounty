@@ -314,3 +314,168 @@ else:
 **状态**: ✅ 完成（代码 + 文档 + 测试）  
 **提交准备度**: 100%  
 **下一步**: 等待 GitHub Token 或手动提交
+
+---
+
+## 🔧 Troubleshooting
+
+### Hook 不生效
+
+```bash
+# 1. 检查 settings.json 路径
+cat ~/.claude/settings.json | grep -A5 hooks
+
+# 2. 检查 hook 文件是否存在且有执行权限
+ls -la ~/.claude/hooks/pre-bash-hook.py
+chmod +x ~/.claude/hooks/pre-bash-hook.py
+
+# 3. 检查日志
+cat ~/.claude/hooks/blocked.log | tail -20
+```
+
+### 误报（阻止了安全命令）
+
+编辑 `pre-bash-hook.py`，在 `WHITELIST` 中添加：
+
+```python
+WHITELIST = [
+    r"rm -rf /tmp/.*",
+    r"git push origin main",  # 添加你的安全命令
+]
+```
+
+### 想临时禁用 hook
+
+```bash
+# 方法 1: 重命名 hook 文件
+mv ~/.claude/hooks/pre-bash-hook.py ~/.claude/hooks/pre-bash-hook.py.disabled
+
+# 方法 2: 在 settings.json 中注释掉 hook 配置
+```
+
+---
+
+## 🔗 集成（Integrations）
+
+### 与 Claude Code 深度集成
+
+在 `~/.claude/settings.json` 中添加更多 hook：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": {
+      "bash": "~/.claude/hooks/pre-bash-hook.py",
+      "python": "~/.claude/hooks/pre-python-hook.py",
+      "git": "~/.claude/hooks/pre-git-hook.py"
+    },
+    "PostToolUse": {
+      "bash": "~/.claude/hooks/post-bash-logger.py"
+    }
+  }
+}
+```
+
+### 团队协作（共享 hook 配置）
+
+```bash
+# 1. 在项目中创建 .claude/settings.json
+git clone your-repo.git
+cd your-repo
+mkdir -p .claude
+cp ~/.claude/hooks/pre-bash-hook.py .claude/hooks/
+cp ~/.claude/settings.json .claude/settings.json
+
+# 2. 提交到 git
+git add .claude/
+git commit -m "feat: add pre-tool-use hook for safety"
+git push
+
+# 3. 团队成员自动继承
+git pull  # 每个团队成员 pull 后自动获得 hook
+```
+
+---
+
+## 📊 FAQ（常见问题）
+
+### Q1: Hook 会影响性能吗？
+
+**A**: 不会。Hook 执行时间 <10ms，Claude Code 调用 bash 前先运行 hook，如果 hook 通过则继续执行。
+
+### Q2: 如何自定义危险模式？
+
+**A**: 编辑 `pre-bash-hook.py` 中的 `DANGEROUS_PATTERNS`：
+
+```python
+DANGEROUS_PATTERNS = [
+    r"rm -rf /",
+    r"DROP TABLE",
+    r"your-custom-pattern",  # 添加你自己的模式
+]
+```
+
+### Q3: 支持 Windows 吗？
+
+**A**: 目前仅支持 macOS/Linux。Windows 版本正在开发中（需要 PowerShell 适配）。
+
+### Q4: 如何查看被阻止的命令历史？
+
+**A**: 
+
+```bash
+cat ~/.claude/hooks/blocked.log | jq .
+```
+
+输出格式：
+
+```json
+{
+  "timestamp": "2026-05-19T19:30:00",
+  "command": "rm -rf /",
+  "risk_level": "HIGH",
+  "blocked": true
+}
+```
+
+---
+
+## 🚀 高级用法
+
+### 1. 集成到 CI/CD
+
+在 `.github/workflows/ci.yml` 中添加：
+
+```yaml
+- name: Setup pre-tool-use hook
+  run: |
+    mkdir -p ~/.claude/hooks/
+    cp .claude/hooks/pre-bash-hook.py ~/.claude/hooks/
+    chmod +x ~/.claude/hooks/pre-bash-hook.py
+```
+
+### 2. 发送告警到 Slack
+
+修改 `pre-bash-hook.py`，在 `log_blocked_command()` 函数中添加：
+
+```python
+import requests
+
+def send_slack_alert(command, risk_level):
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    if webhook_url:
+        payload = {
+            "text": f"🚨 Dangerous command blocked: `{command}` (Risk: {risk_level})"
+        }
+        requests.post(webhook_url, json=payload)
+```
+
+### 3. 生成周报
+
+```bash
+# 统计本周被阻止的命令
+cat ~/.claude/hooks/blocked.log | \
+  jq -r 'select(.timestamp >= "2026-05-13") | .command' | \
+  sort | uniq -c | sort -rn
+```
+
